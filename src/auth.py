@@ -10,7 +10,7 @@ from .security import (
     hash_password, verify_password, password_needs_rehash,
     generate_otp, generate_token, otp_digest, token_digest, secure_equals
 )
-from .mailer import send_mfa_code, send_invitation
+from .mailer import send_mfa_code, send_invitation, MailDeliveryError
 
 ROLE_DEFS = {
     "ADMIN": "Administração total",
@@ -149,11 +149,29 @@ def start_login(email: str, password: str):
         # O OTP nunca é gravado em plaintext nem em logs.
         try:
             send_mfa_code(user.email, code)
+        except MailDeliveryError as exc:
+            challenge.consumed_at = now
+            db.add(AuthEvent(
+                user_id=user.id,
+                email_attempted=user.email,
+                event_type="MFA_SEND",
+                success=False,
+                details=exc.code,
+            ))
+            message = "Não foi possível enviar o código MFA. Tente novamente mais tarde."
+            if get_settings().smtp_diagnostics:
+                message = f"{message} Diagnóstico: {exc.code} — {exc.safe_message}"
+            return {
+                "ok": False,
+                "message": message,
+            }
         except Exception as exc:
             challenge.consumed_at = now
             db.add(AuthEvent(
-                user_id=user.id, email_attempted=user.email,
-                event_type="MFA_SEND", success=False,
+                user_id=user.id,
+                email_attempted=user.email,
+                event_type="MFA_SEND",
+                success=False,
                 details=type(exc).__name__,
             ))
             return {

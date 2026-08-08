@@ -17,6 +17,8 @@ class Settings:
     smtp_from_email: str
     smtp_from_name: str
     smtp_security: str
+    smtp_timeout: int
+    smtp_diagnostics: bool
 
     mfa_pepper: str
     token_pepper: str
@@ -55,6 +57,8 @@ def get_settings() -> Settings:
         smtp_from_email=str(_get("SMTP_FROM_EMAIL")).strip(),
         smtp_from_name=str(_get("SMTP_FROM_NAME", "MyBooks")).strip(),
         smtp_security=str(_get("SMTP_SECURITY", "STARTTLS")).upper().strip(),
+        smtp_timeout=int(_get("SMTP_TIMEOUT", 20)),
+        smtp_diagnostics=bool(_get("SMTP_DIAGNOSTICS", False)),
 
         mfa_pepper=str(_get("MFA_PEPPER")),
         token_pepper=str(_get("TOKEN_PEPPER")),
