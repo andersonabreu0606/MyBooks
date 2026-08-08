@@ -1,4 +1,4 @@
-\
+import logging
 import streamlit as st
 
 from src.auth import (
@@ -11,6 +11,7 @@ from src.auth import (
     list_users,
 )
 from src.books import list_books, create_book
+from src.config import get_settings
 
 st.set_page_config(
     page_title="BookApp",
@@ -31,11 +32,22 @@ div[data-testid="stForm"] { border: 1px solid rgba(128,128,128,.25); padding: 1r
 </style>
 """, unsafe_allow_html=True)
 
+logger = logging.getLogger(__name__)
+
 try:
     ensure_schema_and_bootstrap()
 except Exception as exc:
-    st.error("Falha na inicialização segura da aplicação.")
-    st.exception(exc)
+    logger.exception("Falha na inicialização da aplicação")
+    st.error(
+        "Não foi possível inicializar a aplicação. "
+        "Verifique a ligação à base de dados e os Secrets."
+    )
+    try:
+        debug_enabled = bool(st.secrets.get("APP_DEBUG", False))
+    except Exception:
+        debug_enabled = False
+    if debug_enabled:
+        st.exception(exc)
     st.stop()
 
 def init_state():

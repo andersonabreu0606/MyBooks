@@ -1,42 +1,54 @@
-\
-import ssl
 from contextlib import contextmanager
+
 import streamlit as st
-from sqlalchemy import create_engine
-from sqlalchemy.engine import URL
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
+
 from .config import get_settings
+
+
+def _sqlalchemy_database_url(raw_url: str) -> str:
+    # O Neon normalmente fornece "postgresql://...".
+    # Forçamos o driver Psycopg 3 no SQLAlchemy.
+    if raw_url.startswith("postgresql+psycopg://"):
+        return raw_url
+    if raw_url.startswith("postgresql://"):
+        return raw_url.replace(
+            "postgresql://",
+            "postgresql+psycopg://",
+            1,
+        )
+    if raw_url.startswith("postgres://"):
+        return raw_url.replace(
+            "postgres://",
+            "postgresql+psycopg://",
+            1,
+        )
+    raise RuntimeError(
+        "DATABASE_URL inválida. Utilize a connection string PostgreSQL fornecida pelo Neon."
+    )
+
 
 @st.cache_resource
 def get_engine():
     cfg = get_settings()
-    url = URL.create(
-        "mysql+pymysql",
-        username=cfg.db_user,
-        password=cfg.db_password,
-        host=cfg.db_host,
-        port=cfg.db_port,
-        database=cfg.db_name,
-        query={"charset": "utf8mb4"},
-    )
+    url = _sqlalchemy_database_url(cfg.database_url)
 
-    connect_args = {}
-    if cfg.db_ssl_enabled:
-        ctx = ssl.create_default_context(
-            cadata=cfg.db_ssl_ca_pem or None
-        )
-        ctx.check_hostname = True
-        ctx.verify_mode = ssl.CERT_REQUIRED
-        connect_args["ssl"] = ctx
-
+    # Neon pode colocar o compute em idle/scale-to-zero.
+    # pool_pre_ping valida a ligação antes de a reutilizar.
     return create_engine(
         url,
         pool_pre_ping=True,
-        pool_recycle=1800,
+        pool_recycle=300,
         pool_size=5,
         max_overflow=5,
-        connect_args=connect_args,
+        pool_timeout=30,
+        connect_args={
+            "connect_timeout": 15,
+            "application_name": cfg.app_name,
+        },
     )
+
 
 @st.cache_resource
 def get_session_factory():
@@ -45,6 +57,12 @@ def get_session_factory():
         autoflush=False,
         expire_on_commit=False,
     )
+
+
+def test_database_connection() -> None:
+    with get_engine().connect() as conn:
+        conn.execute(text("SELECT 1"))
+
 
 @contextmanager
 def db_session():

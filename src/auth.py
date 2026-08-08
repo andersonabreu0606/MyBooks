@@ -1,4 +1,3 @@
-\
 from datetime import datetime, timedelta, timezone
 from sqlalchemy import select, func
 from sqlalchemy.orm import selectinload
@@ -28,9 +27,10 @@ def normalize_email(email: str) -> str:
 
 def ensure_schema_and_bootstrap():
     engine = get_engine()
-    Base.metadata.create_all(engine)
-
     cfg = get_settings()
+    if cfg.auto_create_schema:
+        Base.metadata.create_all(engine)
+
     with db_session() as db:
         for name, description in ROLE_DEFS.items():
             role = db.scalar(select(Role).where(Role.name == name))

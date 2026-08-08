@@ -1,118 +1,172 @@
-# BookApp — Streamlit + Python + SQLAlchemy + MySQL
+# MyBooks Secure v2 — Streamlit + SQLAlchemy + Neon PostgreSQL
 
-Starter secure-first para uma aplicação de livros.
+Versão migrada de MySQL para **Neon PostgreSQL**.
 
-## Incluído
+## Stack
 
-- Login por e-mail + palavra-passe.
-- Password hashing com Argon2id.
-- MFA por e-mail com OTP de 8 dígitos.
-- OTP com TTL de 5 minutos, uso único e limite de 5 tentativas.
-- OTP nunca armazenado em plaintext; digest HMAC com pepper fora da base.
-- Bloqueio temporário após falhas sucessivas de password.
-- RBAC: `ADMIN`, `LIBRARIAN`, `READER`.
-- Convite de utilizadores por link de ativação de uso único.
-- Auditoria básica de autenticação.
-- MySQL via SQLAlchemy/PyMySQL.
-- TLS para MySQL por padrão.
-- SMTP STARTTLS/SSL.
-- CRUD inicial de livros.
-- Interface responsiva/mobile-first.
+- Streamlit
+- Python
+- SQLAlchemy 2
+- PostgreSQL no Neon
+- Psycopg 3
+- Argon2id para passwords
+- MFA por código enviado por e-mail
+- RBAC: ADMIN, LIBRARIAN e READER
+- SMTP STARTTLS/SSL
 
-## 1. Criar a base
+## Princípio de configuração
 
-No MySQL:
+A aplicação lê configurações **exclusivamente de `st.secrets`**.
 
-```sql
-CREATE DATABASE bookapp
-  CHARACTER SET utf8mb4
-  COLLATE utf8mb4_0900_ai_ci;
+Não existe fallback para `.env` nem `os.environ`.
 
-CREATE USER 'bookapp_app'@'%' IDENTIFIED BY 'UMA_SENHA_FORTE';
-GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, ALTER, INDEX, REFERENCES
-ON bookapp.* TO 'bookapp_app'@'%';
-FLUSH PRIVILEGES;
+O ficheiro real:
+
+```text
+.streamlit/secrets.toml
 ```
 
-> Em produção, depois da fase inicial de schema/migrations, retire `CREATE` e `ALTER`
-> da conta da aplicação e use uma conta separada para migrations.
+não deve ser versionado. O repositório contém apenas:
 
-## 2. Configurar secrets
-
-Localmente:
-
-```bash
-mkdir -p .streamlit
-cp .streamlit/secrets.example.toml .streamlit/secrets.toml
+```text
+.streamlit/secrets.example.toml
 ```
 
-No Streamlit Community Cloud, copie os mesmos pares chave/valor para **Secrets**.
+## 1. Criar o projeto no Neon
 
-**Não faça commit de `.streamlit/secrets.toml`.**
+No Neon:
 
-## 3. Gerar peppers
+1. Crie um projeto PostgreSQL.
+2. Abra **Connect**.
+3. Ative **Connection pooling**.
+4. Copie a connection string.
+5. Confirme que a URL inclui `sslmode=require`.
+6. Guarde a string completa no Secret `DATABASE_URL`.
 
-Gere dois valores diferentes:
+Exemplo estrutural:
+
+```toml
+DATABASE_URL = "postgresql://USER:PASSWORD@ep-xxxx-pooler.REGION.aws.neon.tech/neondb?sslmode=require&channel_binding=require"
+```
+
+Não coloque esta string no GitHub.
+
+## 2. Secrets do Streamlit
+
+Use o conteúdo de:
+
+```text
+.streamlit/secrets.example.toml
+```
+
+No Streamlit Community Cloud:
+
+```text
+App
+  > Settings
+    > Secrets
+```
+
+Cole todas as variáveis.
+
+Variáveis utilizadas:
+
+```text
+APP_NAME
+APP_URL
+APP_DEBUG
+AUTO_CREATE_SCHEMA
+DATABASE_URL
+
+SMTP_HOST
+SMTP_PORT
+SMTP_USERNAME
+SMTP_PASSWORD
+SMTP_FROM_EMAIL
+SMTP_FROM_NAME
+SMTP_SECURITY
+
+MFA_PEPPER
+TOKEN_PEPPER
+
+BOOTSTRAP_ADMIN_EMAIL
+BOOTSTRAP_ADMIN_NAME
+BOOTSTRAP_ADMIN_PASSWORD
+```
+
+## 3. Criar os peppers
+
+Execute duas vezes:
 
 ```bash
 python -c "import secrets; print(secrets.token_hex(32))"
-python -c "import secrets; print(secrets.token_hex(32))"
 ```
 
-Use-os em `MFA_PEPPER` e `TOKEN_PEPPER`.
+Use valores diferentes em:
 
-## 4. Instalar e executar
+```toml
+MFA_PEPPER = "..."
+TOKEN_PEPPER = "..."
+```
+
+## 4. Primeiro deploy
+
+Inicialmente:
+
+```toml
+AUTO_CREATE_SCHEMA = true
+```
+
+A aplicação cria as tabelas SQLAlchemy se ainda não existirem.
+
+Se a tabela `users` estiver vazia, cria o primeiro ADMIN através de:
+
+```text
+BOOTSTRAP_ADMIN_EMAIL
+BOOTSTRAP_ADMIN_NAME
+BOOTSTRAP_ADMIN_PASSWORD
+```
+
+Depois de confirmar o primeiro acesso:
+
+1. remova `BOOTSTRAP_ADMIN_PASSWORD` dos Secrets;
+2. altere `AUTO_CREATE_SCHEMA = false`;
+3. numa evolução posterior, use Alembic para migrations formais.
+
+## 5. Execução local
+
+Crie:
+
+```text
+.streamlit/secrets.toml
+```
+
+a partir do exemplo e depois:
 
 ```bash
 python -m venv .venv
-# Windows:
-.venv\Scripts\activate
-# Linux/macOS:
-# source .venv/bin/activate
-
 pip install -r requirements.txt
 streamlit run app.py
 ```
 
-## 5. Primeiro administrador
+## 6. Segurança
 
-Se a tabela `users` estiver vazia, o sistema cria o primeiro administrador usando:
+- Connection string do Neon apenas nos Streamlit Secrets.
+- TLS exigido na connection string (`sslmode=require`).
+- Passwords: Argon2id.
+- MFA OTP: 8 dígitos.
+- OTP expira em 5 minutos.
+- OTP de uso único.
+- Limite de tentativas.
+- OTP armazenado apenas como HMAC digest.
+- RBAC no backend.
+- Erros técnicos ocultados quando `APP_DEBUG = false`.
+- `.streamlit/secrets.toml` ignorado pelo Git.
 
-- `BOOTSTRAP_ADMIN_EMAIL`
-- `BOOTSTRAP_ADMIN_NAME`
-- `BOOTSTRAP_ADMIN_PASSWORD`
+## 7. Recomendação Neon
 
-Depois do primeiro deploy e do primeiro acesso, **remova `BOOTSTRAP_ADMIN_PASSWORD` dos secrets**.
+Para uma aplicação hospedada no Streamlit Cloud, prefira a connection string
+**pooled**, identificável por `-pooler` no hostname.
 
-## 6. TLS do MySQL
-
-`DB_SSL_ENABLED = true` por padrão.
-
-Se o MySQL usa certificado emitido por uma CA pública, normalmente não precisa fornecer
-`DB_SSL_CA_PEM`.
-
-Se usa CA própria/self-signed, copie a CA PEM completa para `DB_SSL_CA_PEM`.
-
-Não exponha a porta 3306 para `0.0.0.0/0`. Restrinja por firewall sempre que possível.
-
-## 7. SMTP
-
-Use:
-
-- `SMTP_SECURITY = "STARTTLS"` com porta 587; ou
-- `SMTP_SECURITY = "SSL"` com porta 465.
-
-A conta SMTP deve ser exclusiva da aplicação e as credenciais ficam apenas nos Secrets.
-
-## Próximas evoluções recomendadas
-
-1. Alembic para migrations formais.
-2. Recuperação de palavra-passe.
-3. Gestão de ativação/desativação e alteração de roles.
-4. TOTP/passkeys como MFA mais forte para administradores.
-5. Catálogo normalizado: autores, editoras, categorias, edições e ISBN.
-6. Biblioteca pessoal, favoritos, estado de leitura e avaliações.
-7. Rate limiting persistente por IP/conta.
-8. Dashboard e auditoria administrativa.
-9. SAST/SCA/secret scanning no GitHub Actions.
-10. Pentest antes de produção.
+O engine SQLAlchemy usa `pool_pre_ping=True`, o que ajuda quando o compute do
+Neon ficou inativo e uma conexão antiga deixou de ser válida.

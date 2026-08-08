@@ -1,4 +1,3 @@
-\
 from sqlalchemy import select, or_
 from .db import db_session
 from .models import Book
